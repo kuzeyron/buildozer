@@ -6,24 +6,20 @@ import buildozer as buildozer_module
 from buildozer import Buildozer
 
 
-def patch_buildozer(method):
-    return mock.patch("buildozer.Buildozer.{method}".format(method=method))
+def patch_buildops_cmd():
+    return mock.patch("buildozer.buildops.cmd")
 
 
-def patch_buildozer_cmd():
-    return patch_buildozer("cmd")
+def patch_buildops_checkbin():
+    return mock.patch("buildozer.buildops.checkbin")
 
 
-def patch_buildozer_checkbin():
-    return patch_buildozer("checkbin")
+def patch_buildops_file_exists():
+    return mock.patch("buildozer.buildops.file_exists")
 
 
-def patch_buildozer_file_exists():
-    return patch_buildozer("file_exists")
-
-
-def patch_buildozer_error():
-    return patch_buildozer("error")
+def patch_logger_error():
+    return mock.patch("buildozer.logger.Logger.error")
 
 
 def default_specfile_path():

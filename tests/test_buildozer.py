@@ -5,6 +5,7 @@ import unittest
 import buildozer as buildozer_module
 from buildozer import Buildozer
 from io import StringIO
+from sys import platform
 import tempfile
 from unittest import mock
 
@@ -57,7 +58,7 @@ class TestBuildozer(unittest.TestCase):
         replace = 'log_level = {}'.format(log_level)
         cls.file_re_sub(specfilename, pattern, replace)
         buildozer = Buildozer(specfilename)
-        assert buildozer.log_level == log_level
+        assert buildozer.logger.log_level == log_level
 
     def test_buildozer_base(self):
         """
@@ -91,41 +92,11 @@ class TestBuildozer(unittest.TestCase):
         """
         # the default log level value is known
         buildozer = Buildozer('does_not_exist.spec')
-        assert buildozer.log_level == 2
+        assert buildozer.logger.log_level == 2
         # sets log level to 1 on the spec file
         self.set_specfile_log_level(self.specfile.name, 1)
         buildozer = Buildozer(self.specfile.name)
-        assert buildozer.log_level == 1
-
-    def test_log_print(self):
-        """
-        Checks logger prints different info depending on log level.
-        """
-        # sets log level to 1 in the spec file
-        self.set_specfile_log_level(self.specfile.name, 1)
-        buildozer = Buildozer(self.specfile.name)
-        assert buildozer.log_level == 1
-        # at this level, debug messages shouldn't not be printed
-        with mock.patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            buildozer.debug('debug message')
-            buildozer.info('info message')
-            buildozer.error('error message')
-        # using `in` keyword rather than `==` because of bash color prefix/suffix
-        assert 'debug message' not in mock_stdout.getvalue()
-        assert 'info message' in mock_stdout.getvalue()
-        assert 'error message' in mock_stdout.getvalue()
-        # sets log level to 2 in the spec file
-        self.set_specfile_log_level(self.specfile.name, 2)
-        buildozer = Buildozer(self.specfile.name)
-        assert buildozer.log_level == 2
-        # at this level all message types should be printed
-        with mock.patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            buildozer.debug('debug message')
-            buildozer.info('info message')
-            buildozer.error('error message')
-        assert 'debug message' in mock_stdout.getvalue()
-        assert 'info message' in mock_stdout.getvalue()
-        assert 'error message' in mock_stdout.getvalue()
+        assert buildozer.logger.log_level == 1
 
     def test_run_command_unknown(self):
         """
@@ -140,6 +111,9 @@ class TestBuildozer(unittest.TestCase):
                 buildozer.run_command(args)
         assert mock_stdout.getvalue() == 'Unknown command/target {}\n'.format(command)
 
+    @unittest.skipIf(
+        platform == "win32",
+        "Test can't handle when resulting path is normalised on Windows")
     def test_android_ant_path(self):
         """
         Verify that the selected ANT path is being used from the spec file
@@ -151,55 +125,19 @@ class TestBuildozer(unittest.TestCase):
         target = TargetAndroid(buildozer=buildozer)
 
         # Mock first run
-        with mock.patch('buildozer.Buildozer.download') as download, \
-                mock.patch('buildozer.Buildozer.file_extract') as m_file_extract, \
+        with mock.patch('buildozer.buildops.download') as download, \
+                mock.patch('buildozer.buildops.file_extract') as m_file_extract, \
                 mock.patch('os.makedirs'):
             ant_path = target._install_apache_ant()
-        assert m_file_extract.call_args_list == [mock.call(mock.ANY, cwd='/my/ant/path')]
+        assert m_file_extract.call_args_list == [
+            mock.call(mock.ANY, cwd='/my/ant/path', env=mock.ANY)]
         assert ant_path == my_ant_path
         assert download.call_args_list == [
             mock.call("https://archive.apache.org/dist/ant/binaries/", mock.ANY, cwd=my_ant_path)]
         # Mock ant already installed
-        with mock.patch.object(Buildozer, 'file_exists', return_value=True):
+        with mock.patch('buildozer.buildops.file_exists', return_value=True):
             ant_path = target._install_apache_ant()
         assert ant_path == my_ant_path
-
-    def test_cmd_unicode_decode(self):
-        """
-        Verifies Buildozer.cmd() can properly handle non-unicode outputs.
-        refs: https://github.com/kivy/buildozer/issues/857
-        """
-        buildozer = Buildozer()
-        command = 'uname'
-        kwargs = {
-            'show_output': True,
-            'get_stdout': True,
-            'get_stderr': True,
-        }
-        command_output = b'\x80 cannot decode \x80'
-        # showing the point that we can't decode it
-        with self.assertRaises(UnicodeDecodeError):
-            command_output.decode('utf-8')
-        with mock.patch('buildozer.Popen') as m_popen, \
-                mock.patch('buildozer.select') as m_select, \
-                mock.patch('buildozer.stdout') as m_stdout:
-            m_select.select().__getitem__.return_value = [0]
-            # makes sure fcntl.fcntl() gets what it expects so it doesn't crash
-            m_popen().stdout.fileno.return_value = 0
-            m_popen().stderr.fileno.return_value = 2
-            # Buildozer.cmd() is iterating through command output "chunk" until
-            # one chunk is None
-            m_popen().stdout.read.side_effect = [command_output, None]
-            m_popen().returncode = 0
-            stdout, stderr, returncode = buildozer.cmd(command, **kwargs)
-        # when get_stdout is True, the command output also gets returned
-        assert stdout == command_output.decode('utf-8', 'ignore')
-        assert stderr is None
-        assert returncode == 0
-        # Python2 and Python3 have different approaches for decoding the output
-        assert m_stdout.write.call_args_list == [
-            mock.call(command_output.decode('utf-8', 'replace'))
-        ]
 
     def test_p4a_recommended_ndk_version_default_value(self):
         self.set_specfile_log_level(self.specfile.name, 1)

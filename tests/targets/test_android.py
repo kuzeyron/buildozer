@@ -1,4 +1,5 @@
 import os
+import os.path
 import tempfile
 from io import StringIO
 from unittest import mock
@@ -9,23 +10,22 @@ import pytest
 from buildozer.targets.android import TargetAndroid
 from tests.targets.utils import (
     init_buildozer,
-    patch_buildozer,
-    patch_buildozer_checkbin,
-    patch_buildozer_cmd,
-    patch_buildozer_file_exists,
+    patch_buildops_checkbin,
+    patch_buildops_cmd,
+    patch_buildops_file_exists,
 )
 
 
-def patch_buildozer_cmd_expect():
-    return patch_buildozer("cmd_expect")
+def patch_buildops_cmd_expect():
+    return mock.patch("buildozer.buildops.cmd_expect")
 
 
-def patch_buildozer_download():
-    return patch_buildozer("download")
+def patch_buildops_download():
+    return mock.patch("buildozer.buildops.download")
 
 
-def patch_buildozer_file_extract():
-    return patch_buildozer("file_extract")
+def patch_buildops_file_extract():
+    return mock.patch("buildozer.buildops.file_extract")
 
 
 def patch_os_isfile():
@@ -65,7 +65,7 @@ def call_build_package(target_android):
     with patch_target_android('_update_libraries_references') as m_update_libraries_references, \
          patch_target_android('_generate_whitelist') as m_generate_whitelist, \
          mock.patch('buildozer.targets.android.TargetAndroid.execute_build_package') as m_execute_build_package, \
-         mock.patch('buildozer.targets.android.copyfile') as m_copyfile, \
+         mock.patch('buildozer.targets.android.buildops.file_copy') as m_copyfile, \
          mock.patch('buildozer.targets.android.os.listdir') as m_listdir:
         m_listdir.return_value = ['30.0.0-rc2']
         target_android.build_package()
@@ -131,18 +131,18 @@ class TestTargetAndroid:
         """Tests the _sdkmanager() method."""
         target_android = init_target(self.temp_dir)
         kwargs = {}
-        with patch_buildozer_cmd() as m_cmd, patch_buildozer_cmd_expect() as m_cmd_expect, patch_os_isfile() as m_isfile:
+        with patch_buildops_cmd() as m_cmd, patch_buildops_cmd_expect() as m_cmd_expect, patch_os_isfile() as m_isfile:
             m_isfile.return_value = True
-            assert m_cmd.return_value == target_android._sdkmanager(**kwargs)
+            m_cmd.return_value = "Some value"
+            assert target_android._sdkmanager(**kwargs) == "Some value"
         assert m_cmd.call_count == 1
         assert m_cmd_expect.call_count == 0
         assert m_isfile.call_count == 1
         kwargs = {"return_child": True}
-        with patch_buildozer_cmd() as m_cmd, patch_buildozer_cmd_expect() as m_cmd_expect, patch_os_isfile() as m_isfile:
+        with patch_buildops_cmd() as m_cmd, patch_buildops_cmd_expect() as m_cmd_expect, patch_os_isfile() as m_isfile:
             m_isfile.return_value = True
-            assert m_cmd_expect.return_value == target_android._sdkmanager(
-                **kwargs
-            )
+            m_cmd_expect.return_value = "Some value"
+            assert target_android._sdkmanager(**kwargs) == "Some value"
         assert m_cmd.call_count == 0
         assert m_cmd_expect.call_count == 1
         assert m_isfile.call_count == 1
@@ -154,8 +154,8 @@ class TestTargetAndroid:
         assert not hasattr(target_android, "adb_executable")
         assert not hasattr(target_android, "adb_args")
         assert not hasattr(target_android, "javac_cmd")
-        assert "PATH" not in buildozer.environ
-        with patch_buildozer_checkbin() as m_checkbin:
+        assert "PATH" in buildozer.environ
+        with patch_buildops_checkbin() as m_checkbin:
             target_android.check_requirements()
         assert m_checkbin.call_args_list == [
             mock.call("Git (git)", "git"),
@@ -167,7 +167,10 @@ class TestTargetAndroid:
         assert target_android.adb_args == []
         assert target_android.javac_cmd == "javac"
         assert target_android.keytool_cmd == "keytool"
-        assert "PATH" in buildozer.environ
+        assert buildozer.environ["PATH"].startswith(
+            os.path.join(
+                target_android.apache_ant_dir, "bin")
+        )
 
     def test_check_configuration_tokens(self):
         """Basic tests for the check_configuration_tokens() method."""
@@ -182,7 +185,7 @@ class TestTargetAndroid:
     def test_install_android_sdk(self, platform):
         """Basic tests for the _install_android_sdk() method."""
         target_android = init_target(self.temp_dir)
-        with patch_buildozer_file_exists() as m_file_exists, patch_buildozer_download() as m_download:
+        with patch_buildops_file_exists() as m_file_exists, patch_buildops_download() as m_download:
             m_file_exists.return_value = True
             sdk_dir = target_android._install_android_sdk()
         assert m_file_exists.call_args_list == [
@@ -190,9 +193,9 @@ class TestTargetAndroid:
         ]
         assert m_download.call_args_list == []
         assert sdk_dir.endswith(".buildozer/android/platform/android-sdk")
-        with patch_buildozer_file_exists() as m_file_exists, \
-                patch_buildozer_download() as m_download, \
-                patch_buildozer_file_extract() as m_file_extract, \
+        with patch_buildops_file_exists() as m_file_exists, \
+                patch_buildops_download() as m_download, \
+                patch_buildops_file_extract() as m_file_extract, \
                 patch_platform(platform):
             m_file_exists.return_value = False
             sdk_dir = target_android._install_android_sdk()
@@ -209,7 +212,8 @@ class TestTargetAndroid:
                 cwd=mock.ANY,
             )
         ]
-        assert m_file_extract.call_args_list == [mock.call(archive, cwd=mock.ANY)]
+        assert m_file_extract.call_args_list == [
+            mock.call(archive, cwd=mock.ANY, env=mock.ANY)]
         assert sdk_dir.endswith(".buildozer/android/platform/android-sdk")
 
     def test_build_package(self):
@@ -255,7 +259,7 @@ class TestTargetAndroid:
                 "arm64-v8a",
                 "--arch",
                 "armeabi-v7a"
-            ])
+            ], env=mock.ANY)
         ]
 
     def test_execute_build_package__release__apk(self):
@@ -278,7 +282,7 @@ class TestTargetAndroid:
                 "arm64-v8a",
                 "--arch",
                 "armeabi-v7a"
-            ])
+            ], env=mock.ANY)
         ]
 
     def test_execute_build_package__release__aab(self):
@@ -302,7 +306,7 @@ class TestTargetAndroid:
                 "arm64-v8a",
                 "--arch",
                 "armeabi-v7a",
-            ])
+            ], env=mock.ANY)
         ]
 
     def test_numeric_version(self):
@@ -429,13 +433,14 @@ class TestTargetAndroid:
             'p4a.fork': 'myfork',
         })
 
-        with patch_buildozer_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
+        with patch_buildops_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
             m_open.return_value = StringIO('install_reqs = []')  # to stub setup.py parsing
             target_android._install_p4a()
 
         assert mock.call(
             ["git", "clone", "-b", "master", "--single-branch", "https://custom-p4a-url/p4a.git", "python-for-android"],
-            cwd=mock.ANY) in m_cmd.call_args_list
+            cwd=mock.ANY,
+            env=mock.ANY) in m_cmd.call_args_list
 
     def test_install_platform_p4a_clone_fork(self):
         """The `p4a.fork` config should be used for cloning p4a."""
@@ -443,25 +448,27 @@ class TestTargetAndroid:
             'p4a.fork': 'fork'
         })
 
-        with patch_buildozer_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
+        with patch_buildops_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
             m_open.return_value = StringIO('install_reqs = []')  # to stub setup.py parsing
             target_android._install_p4a()
 
         assert mock.call(
             ["git", "clone", "-b", "master", "--single-branch", "https://github.com/fork/python-for-android.git", "python-for-android"],
-            cwd=mock.ANY) in m_cmd.call_args_list
+            cwd=mock.ANY,
+            env=mock.ANY) in m_cmd.call_args_list
 
     def test_install_platform_p4a_clone_default(self):
         """The default URL should be used for cloning p4a if no config options `p4a.url` and `p4a.fork` are set."""
         target_android = init_target(self.temp_dir)
 
-        with patch_buildozer_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
+        with patch_buildops_cmd() as m_cmd, mock.patch('buildozer.targets.android.open') as m_open:
             m_open.return_value = StringIO('install_reqs = []')  # to stub setup.py parsing
             target_android._install_p4a()
 
         assert mock.call(
             ["git", "clone", "-b", "master", "--single-branch", "https://github.com/kivy/python-for-android.git", "python-for-android"],
-            cwd=mock.ANY) in m_cmd.call_args_list
+            cwd=mock.ANY,
+            env=mock.ANY) in m_cmd.call_args_list
 
     def test_orientation(self):
         target_android = init_target(self.temp_dir, {
